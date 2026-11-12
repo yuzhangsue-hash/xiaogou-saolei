@@ -70,25 +70,31 @@ let touchMode='reveal';
 function setTouchMode(mode){touchMode=mode;$('touchReveal').setAttribute('aria-pressed',String(mode==='reveal'));$('touchFlag').setAttribute('aria-pressed',String(mode==='flag'));}
 $('touchReveal').onclick=()=>setTouchMode('reveal');$('touchFlag').onclick=()=>setTouchMode('flag');
 const victoryDogFiles=["./dogs/dog-01.gif", "./dogs/dog-02.gif", "./dogs/dog-03.gif", "./dogs/dog-04.gif", "./dogs/dog-05.gif", "./dogs/dog-06.gif", "./dogs/dog-07.gif", "./dogs/dog-08.gif", "./dogs/dog-09.gif", "./dogs/dog-10.gif"];
-let lastVictoryDog=-1,victoryTimer=null,victoryGeneration=0;
-function closeVictoryDog(){victoryGeneration++;clearInterval(victoryTimer);victoryTimer=null;$('victoryDogOverlay').classList.remove('visible');$('victoryDogImage').removeAttribute('src');}
-function showVictoryDog(){
+let lastVictoryDog=-1,victoryTimer=null,victoryGeneration=0,preparedVictoryDog=-1,preparedVictoryFrames=[],preparedVictoryLoad=null;
+function prepareVictoryDog(){
  let i=Math.floor(Math.random()*victoryDogFiles.length);
  if(victoryDogFiles.length>1&&i===lastVictoryDog)i=(i+1+Math.floor(Math.random()*(victoryDogFiles.length-1)))%victoryDogFiles.length;
+ preparedVictoryDog=i;
+ const name='dog-'+String(i+1).padStart(2,'0');
+ preparedVictoryFrames=Array.from({length:6},(_,frame)=>'./dogs/frames/'+name+'-'+frame+'.webp');
+ preparedVictoryLoad=Promise.all(preparedVictoryFrames.map(src=>new Promise((resolve,reject)=>{const preload=new Image();preload.onload=resolve;preload.onerror=reject;preload.src=src;})));
+ preparedVictoryLoad.catch(()=>{});
+}
+function closeVictoryDog(){victoryGeneration++;clearInterval(victoryTimer);victoryTimer=null;$('victoryDogOverlay').classList.remove('visible');$('victoryDogImage').removeAttribute('src');}
+function showVictoryDog(){
+ if(preparedVictoryDog<0)prepareVictoryDog();
+ const i=preparedVictoryDog,frames=preparedVictoryFrames;
  lastVictoryDog=i;
  const generation=++victoryGeneration,img=$('victoryDogImage');
- img.src=victoryDogFiles[i]; // While the frame sequence loads, show the original GIF.
- img.onerror=()=>say('动画加载失败，请重新打开本网页。');
+ img.onerror=()=>{img.onerror=()=>say('动画加载失败，请重新打开本网页。');img.src=victoryDogFiles[i];};
+ img.src=frames[0];
  $('victoryDogOverlay').classList.add('visible');
- const name='dog-'+String(i+1).padStart(2,'0');
- const frames=Array.from({length:6},(_,frame)=>'./dogs/frames/'+name+'-'+frame+'.webp');
- Promise.all(frames.map(src=>new Promise((resolve,reject)=>{const preload=new Image();preload.onload=resolve;preload.onerror=reject;preload.src=src;}))).then(()=>{
+ preparedVictoryLoad.then(()=>{
   if(generation!==victoryGeneration)return;
   clearInterval(victoryTimer);
   let frame=0;
-  img.src=frames[frame];
   victoryTimer=setInterval(()=>{if(generation!==victoryGeneration){clearInterval(victoryTimer);return;}frame=(frame+1)%frames.length;img.src=frames[frame];},i<7?180:220);
- }).catch(()=>{}); // Older browsers can keep playing the GIF.
+ }).catch(()=>{if(generation===victoryGeneration)img.src=victoryDogFiles[i];});
 }
 
 $('victoryDogAgain').onclick=()=>{closeVictoryDog();reset();};
@@ -101,9 +107,9 @@ const pos=i=>'第'+(Math.floor(i/C)+1)+'行、第'+(i%C+1)+'列';
 const say=s=>$('status').textContent=s;
 function save(){history.push({cells:cells.map(x=>({...x})),started,done,hit,flags,opened});}
 function stale(){if(reportFresh){reportFresh=false;$('report-state').textContent='已过期，请重新检查';}}
-function reset(l=level){level=l;[R,C,M]=levels[level];N=R*C;SAFE=N-M;cells=Array.from({length:N},()=>({mine:false,n:0,open:false,flag:false}));started=false;done=false;hit=-1;flags=0;opened=0;history=[];undos=0;hintAt=-1;hintText='';reportFresh=false;$('report').hidden=true;for(const k of Object.keys(levels))$(k).classList.toggle('active',k===level);board.style.gridTemplateColumns='repeat('+C+',var(--tile-size,25px))';board.style.gridTemplateRows='repeat('+R+',var(--tile-size,25px))';$('safe').textContent=SAFE;say('');render();}
+function reset(l=level){level=l;[R,C,M]=levels[level];N=R*C;SAFE=N-M;cells=Array.from({length:N},()=>({mine:false,n:0,open:false,flag:false}));started=false;done=false;hit=-1;flags=0;opened=0;history=[];undos=0;hintAt=-1;hintText='';reportFresh=false;$('report').hidden=true;for(const k of Object.keys(levels))$(k).classList.toggle('active',k===level);board.style.gridTemplateColumns='repeat('+C+',var(--tile-size,25px))';board.style.gridTemplateRows='repeat('+R+',var(--tile-size,25px))';$('safe').textContent=SAFE;say('');render();prepareVictoryDog();}
 function place(first){const banned=new Set([first,...adj(first)]),pool=[];for(let i=0;i<N;i++)if(!banned.has(i))pool.push(i);for(let k=0;k<M;k++){let j=k+Math.floor(Math.random()*(pool.length-k));[pool[k],pool[j]]=[pool[j],pool[k]];cells[pool[k]].mine=true;}for(let i=0;i<N;i++)cells[i].n=adj(i).filter(j=>cells[j].mine).length;started=true;}
-function reveal(i){if(done||cells[i].open||cells[i].flag)return;save();if(!started)place(i);stale();hintAt=-1;if(cells[i].mine){done=true;hit=i;say('踩雷：'+pos(i)+'。点击「撤销上一步」可恢复踩雷前状态，原雷区不变。');render();return;}const q=[i],seen=new Set();while(q.length){const j=q.pop();if(seen.has(j)||cells[j].open||cells[j].flag||cells[j].mine)continue;seen.add(j);cells[j].open=true;opened++;if(cells[j].n===0)for(const x of adj(j))if(!cells[x].open&&!cells[x].flag)q.push(x);}if(opened===SAFE){done=true;hit=-1;say('通关！全部安全格已翻开。');showVictoryDog();}else say('已翻开 '+opened+' 格。继续推理，或使用下一步提示。');render();}
+function reveal(i){if(done||cells[i].open||cells[i].flag)return;save();if(!started)place(i);stale();hintAt=-1;if(cells[i].mine){done=true;hit=i;say('踩雷：'+pos(i)+'。点击「撤销上一步」可恢复踩雷前状态，原雷区不变。');render();return;}const q=[i],seen=new Set();while(q.length){const j=q.pop();if(seen.has(j)||cells[j].open||cells[j].flag||cells[j].mine)continue;seen.add(j);cells[j].open=true;opened++;if(cells[j].n===0)for(const x of adj(j))if(!cells[x].open&&!cells[x].flag)q.push(x);}if(opened===SAFE){done=true;hit=-1;say('通关！全部安全格已翻开。');showVictoryDog();requestAnimationFrame(()=>requestAnimationFrame(render));return;}say('已翻开 '+opened+' 格。继续推理，或使用下一步提示。');render();}
 function flag(i){if(done||cells[i].open)return;save();cells[i].flag=!cells[i].flag;flags+=cells[i].flag?1:-1;hintAt=-1;stale();render();}
 function undo(){if(!history.length){say('没有可以撤销的操作。');return;}const s=history.pop();cells=s.cells;started=s.started;done=s.done;hit=s.hit;flags=s.flags;opened=s.opened;hintAt=-1;hintText='';undos++;stale();say('已撤销上一步。雷区布局保持不变（若撤销首次点击，则返回尚未布雷状态）。');render();}
 function render(){board.innerHTML='';for(let i=0;i<N;i++){const c=cells[i],el=document.createElement('button');el.type='button';el.className='tile '+(c.open?'open':'covered')+(c.flag?' flagged':'')+(hintAt===i?' hinted':'');el.setAttribute('aria-label',pos(i)+(c.open?' 已翻开':c.flag?' 已插旗':' 未知'));if(i===hit){el.textContent='✹';el.style.background='#fca5a5';}else if(c.open){if(c.mine){el.textContent='✹';el.style.background='#fca5a5';}else if(c.n){el.textContent=c.n;el.classList.add('n'+c.n);}}else if(c.flag){el.textContent='⚑';el.style.color='#dc2626';}el.addEventListener('click',()=>{if(matchMedia('(pointer:coarse)').matches&&touchMode==='flag')flag(i);else reveal(i)});el.addEventListener('contextmenu',e=>{e.preventDefault();flag(i)});board.appendChild(el);}$('left').textContent=M-flags;$('opened').textContent=opened;$('undo').disabled=!history.length;}
