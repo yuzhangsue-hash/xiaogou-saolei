@@ -70,9 +70,26 @@ let touchMode='reveal';
 function setTouchMode(mode){touchMode=mode;$('touchReveal').setAttribute('aria-pressed',String(mode==='reveal'));$('touchFlag').setAttribute('aria-pressed',String(mode==='flag'));}
 $('touchReveal').onclick=()=>setTouchMode('reveal');$('touchFlag').onclick=()=>setTouchMode('flag');
 const victoryDogFiles=["./dogs/dog-01.gif", "./dogs/dog-02.gif", "./dogs/dog-03.gif", "./dogs/dog-04.gif", "./dogs/dog-05.gif", "./dogs/dog-06.gif", "./dogs/dog-07.gif", "./dogs/dog-08.gif", "./dogs/dog-09.gif", "./dogs/dog-10.gif"];
-let lastVictoryDog=-1;
-function closeVictoryDog(){const overlay=$('victoryDogOverlay');overlay.classList.remove('visible');$('victoryDogImage').removeAttribute('src');}
-function showVictoryDog(){let i=Math.floor(Math.random()*victoryDogFiles.length);if(victoryDogFiles.length>1&&i===lastVictoryDog)i=(i+1+Math.floor(Math.random()*(victoryDogFiles.length-1)))%victoryDogFiles.length;lastVictoryDog=i;$('victoryDogImage').src=victoryDogFiles[i];$('victoryDogImage').onerror=()=>say('动画加载失败，请重新打开本网页。');$('victoryDogOverlay').classList.add('visible');}
+let lastVictoryDog=-1,victoryTimer=null,victoryGeneration=0;
+function closeVictoryDog(){victoryGeneration++;clearInterval(victoryTimer);victoryTimer=null;$('victoryDogOverlay').classList.remove('visible');$('victoryDogImage').removeAttribute('src');}
+function showVictoryDog(){
+ let i=Math.floor(Math.random()*victoryDogFiles.length);
+ if(victoryDogFiles.length>1&&i===lastVictoryDog)i=(i+1+Math.floor(Math.random()*(victoryDogFiles.length-1)))%victoryDogFiles.length;
+ lastVictoryDog=i;
+ const generation=++victoryGeneration,img=$('victoryDogImage');
+ img.src=victoryDogFiles[i]; // While the frame sequence loads, show the original GIF.
+ img.onerror=()=>say('动画加载失败，请重新打开本网页。');
+ $('victoryDogOverlay').classList.add('visible');
+ const name='dog-'+String(i+1).padStart(2,'0');
+ const frames=Array.from({length:6},(_,frame)=>'./dogs/frames/'+name+'-'+frame+'.webp');
+ Promise.all(frames.map(src=>new Promise((resolve,reject)=>{const preload=new Image();preload.onload=resolve;preload.onerror=reject;preload.src=src;}))).then(()=>{
+  if(generation!==victoryGeneration)return;
+  clearInterval(victoryTimer);
+  let frame=0;
+  img.src=frames[frame];
+  victoryTimer=setInterval(()=>{if(generation!==victoryGeneration){clearInterval(victoryTimer);return;}frame=(frame+1)%frames.length;img.src=frames[frame];},i<7?180:220);
+ }).catch(()=>{}); // Older browsers can keep playing the GIF.
+}
 
 $('victoryDogAgain').onclick=()=>{closeVictoryDog();reset();};
 
