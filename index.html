@@ -49,7 +49,6 @@ small{color:#806d77}
 </style></head><body>
 <h2>🐶 扫雷</h2>
 <div class="toolbar"><strong>难度</strong><button class="act" id="easy">初级</button><button class="act" id="medium">中级</button><button class="act" id="hard">高级</button><button class="act" id="new">重新开局</button></div>
-<div class="toolbar"><strong>棋盘模式</strong><button class="act" id="logicMode">纯逻辑</button><button class="act" id="randomMode">随机</button></div>
 <div class="stats"><strong>地雷 <span id="left">99</span></strong><strong>已翻开 <span id="opened">0</span>/<span id="safe">381</span></strong></div>
 <div class="toolbar"><button class="act" id="undo">撤销上一步</button><button class="act" id="check">检查旗子</button><button class="act" id="hint">下一步提示</button></div>
 <div class="toolbar" id="touchControls" role="group" aria-label="触屏操作模式"><strong>触屏操作</strong><button class="act" id="touchReveal" type="button" aria-pressed="true">👆 翻开</button><button class="act" id="touchFlag" type="button" aria-pressed="false">🚩 插旗</button><small>选择操作后，轻触格子即可；再次轻触已插旗格子可取消旗子。</small></div>
@@ -102,27 +101,26 @@ function showVictoryDog(){
 $('victoryDogAgain').onclick=()=>{closeVictoryDog();reset();};
 
 const levels={easy:[9,9,10],medium:[16,16,40],hard:[16,30,99]};
-let level='hard',gameMode='logic',R=16,C=30,M=99,N=480,SAFE=381;
-let cells=[],started=false,done=false,generating=false,generatorWorker=null,hit=-1,flags=0,opened=0,history=[],undos=0,hintAt=-1,hintText='',reportFresh=false;
+let level='hard',R=16,C=30,M=99,N=480,SAFE=381;
+let cells=[],started=false,done=false,generating=false,generatorWorker=null,validatedFirst=-1,hit=-1,flags=0,opened=0,history=[],undos=0,hintAt=-1,hintText='',reportFresh=false;
 const adj=i=>{const r=Math.floor(i/C),c=i%C,out=[];for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;let rr=r+dr,cc=c+dc;if(rr>=0&&rr<R&&cc>=0&&cc<C)out.push(rr*C+cc)}return out};
 const pos=i=>'第'+(Math.floor(i/C)+1)+'行、第'+(i%C+1)+'列';
 const say=s=>$('status').textContent=s;
 function save(){history.push({cells:cells.map(x=>({...x})),started,done,hit,flags,opened});}
 function stale(){if(reportFresh){reportFresh=false;$('report-state').textContent='已过期，请重新检查';}}
-function reset(l=level){if(generatorWorker){generatorWorker.terminate();generatorWorker=null;}generating=false;closeVictoryDog();level=l;[R,C,M]=levels[level];N=R*C;SAFE=N-M;cells=Array.from({length:N},()=>({mine:false,n:0,open:false,flag:false}));started=false;done=false;hit=-1;flags=0;opened=0;history=[];undos=0;hintAt=-1;hintText='';reportFresh=false;$('report').hidden=true;for(const k of Object.keys(levels))$(k).classList.toggle('active',k===level);$('logicMode').classList.toggle('active',gameMode==='logic');$('randomMode').classList.toggle('active',gameMode==='random');board.style.gridTemplateColumns='repeat('+C+',var(--tile-size,25px))';board.style.gridTemplateRows='repeat('+R+',var(--tile-size,25px))';$('safe').textContent=SAFE;say('');render();prepareVictoryDog();}
-function place(first){const banned=new Set([first,...adj(first)]),pool=[];for(let i=0;i<N;i++)if(!banned.has(i))pool.push(i);for(let k=0;k<M;k++){let j=k+Math.floor(Math.random()*(pool.length-k));[pool[k],pool[j]]=[pool[j],pool[k]];cells[pool[k]].mine=true;}for(let i=0;i<N;i++)cells[i].n=adj(i).filter(j=>cells[j].mine).length;started=true;}
+function reset(l=level){if(generatorWorker){generatorWorker.terminate();generatorWorker=null;}generating=false;closeVictoryDog();level=l;[R,C,M]=levels[level];N=R*C;SAFE=N-M;cells=Array.from({length:N},()=>({mine:false,n:0,open:false,flag:false}));started=false;done=false;validatedFirst=-1;hit=-1;flags=0;opened=0;history=[];undos=0;hintAt=-1;hintText='';reportFresh=false;$('report').hidden=true;for(const k of Object.keys(levels))$(k).classList.toggle('active',k===level);board.style.gridTemplateColumns='repeat('+C+',var(--tile-size,25px))';board.style.gridTemplateRows='repeat('+R+',var(--tile-size,25px))';$('safe').textContent=SAFE;say('');render();prepareVictoryDog();}
 function generateLogic(first){
  generating=true;say('正在生成并验证纯逻辑棋盘，请稍候…');
  try{const worker=new Worker('./generator-worker.js');generatorWorker=worker;
   worker.onmessage=e=>{if(generatorWorker!==worker)return;worker.terminate();generatorWorker=null;generating=false;
    if(!e.data.ok){say('纯逻辑棋盘生成超时（已尝试 '+e.data.attempts+' 次）。本局未开始，请重新点击格子再试。');return;}
-   cells=e.data.board.map((c,i)=>({...c,flag:cells[i].flag}));started=true;reveal(first);
+   cells=e.data.board.map((c,i)=>({...c,flag:cells[i].flag}));started=true;validatedFirst=first;reveal(first);
   };
   worker.onerror=()=>{if(generatorWorker!==worker)return;worker.terminate();generatorWorker=null;generating=false;say('纯逻辑棋盘生成失败，本局未开始。请重新点击格子再试。');};
   worker.postMessage({rows:R,cols:C,mineCount:M,first});
  }catch{generating=false;generatorWorker=null;say('此浏览器无法启动纯逻辑生成器，请换一个浏览器重试。');}
 }
-function reveal(i){if(generating||done||cells[i].open||cells[i].flag)return;if(!started){if(gameMode==='logic'){generateLogic(i);return;}place(i);}save();stale();hintAt=-1;if(cells[i].mine){done=true;hit=i;say('踩雷：'+pos(i)+'。点击「撤销上一步」可恢复踩雷前状态，原雷区不变。');render();return;}const q=[i],seen=new Set();while(q.length){const j=q.pop();if(seen.has(j)||cells[j].open||cells[j].flag||cells[j].mine)continue;seen.add(j);cells[j].open=true;opened++;if(cells[j].n===0)for(const x of adj(j))if(!cells[x].open&&!cells[x].flag)q.push(x);}if(opened===SAFE){done=true;hit=-1;say('通关！全部安全格已翻开。');showVictoryDog();requestAnimationFrame(()=>requestAnimationFrame(render));return;}say('已翻开 '+opened+' 格。继续推理，或使用下一步提示。');render();}
+function reveal(i){if(generating||done||cells[i].open||cells[i].flag)return;if(!started){generateLogic(i);return;}if(opened===0&&i!==validatedFirst){say('此棋盘已按 '+pos(validatedFirst)+' 验证，请先翻开该格；也可以重新开局。');return;}save();stale();hintAt=-1;if(cells[i].mine){done=true;hit=i;say('踩雷：'+pos(i)+'。点击「撤销上一步」可恢复踩雷前状态，原雷区不变。');render();return;}const q=[i],seen=new Set();while(q.length){const j=q.pop();if(seen.has(j)||cells[j].open||cells[j].flag||cells[j].mine)continue;seen.add(j);cells[j].open=true;opened++;if(cells[j].n===0)for(const x of adj(j))if(!cells[x].open&&!cells[x].flag)q.push(x);}if(opened===SAFE){done=true;hit=-1;say('通关！全部安全格已翻开。');showVictoryDog();requestAnimationFrame(()=>requestAnimationFrame(render));return;}say('已翻开 '+opened+' 格。继续推理，或使用下一步提示。');render();}
 function flag(i){if(generating||done||cells[i].open)return;save();cells[i].flag=!cells[i].flag;flags+=cells[i].flag?1:-1;hintAt=-1;stale();render();}
 function undo(){if(generating)return;if(!history.length){say('没有可以撤销的操作。');return;}const s=history.pop();cells=s.cells;started=s.started;done=s.done;hit=s.hit;flags=s.flags;opened=s.opened;hintAt=-1;hintText='';undos++;stale();say('已撤销上一步。原雷区布局保持不变。');render();}
 function render(){board.innerHTML='';for(let i=0;i<N;i++){const c=cells[i],el=document.createElement('button');el.type='button';el.className='tile '+(c.open?'open':'covered')+(c.flag?' flagged':'')+(hintAt===i?' hinted':'');el.setAttribute('aria-label',pos(i)+(c.open?' 已翻开':c.flag?' 已插旗':' 未知'));if(i===hit){el.textContent='✹';el.style.background='#fca5a5';}else if(c.open){if(c.mine){el.textContent='✹';el.style.background='#fca5a5';}else if(c.n){el.textContent=c.n;el.classList.add('n'+c.n);}}else if(c.flag){el.textContent='⚑';el.style.color='#dc2626';}el.addEventListener('click',()=>{if(matchMedia('(pointer:coarse)').matches&&touchMode==='flag')flag(i);else reveal(i)});el.addEventListener('contextmenu',e=>{e.preventDefault();flag(i)});board.appendChild(el);}$('left').textContent=M-flags;$('opened').textContent=opened;$('undo').disabled=!history.length;}
@@ -134,10 +132,8 @@ function hint(){
  const h=MinesweeperSolver.solveBoard({rows:R,cols:C,mineCount:M,cells});
  if(h.kind==='inconsistent'){hintAt=-1;hintText='当前数字约束互相矛盾，请重新开局。';}
  else if(h.kind==='none'){hintAt=-1;hintText='当前没有可提示的格子。';}
- else if(h.kind==='guess'){
-  hintAt=h.index;const percent=(h.probability*100).toFixed(1);
-  hintText=gameMode==='logic'?'纯逻辑棋盘验证异常，请重新开局。':'没有逻辑确定解。'+pos(h.index)+' 的踩雷概率'+(h.source==='exact'?'为 ':'估计为 ')+percent+'%；这是概率选择，不是安全保证。';
- }else{
+ else if(h.kind==='guess'){hintAt=-1;hintText='纯逻辑棋盘验证异常，请重新开局。';}
+ else{
   hintAt=h.index;const clueIds=[...new Set(h.clues)],clues=clueIds.slice(0,6).map(i=>pos(i)+' 的数字 '+cells[i].n);
   let reason;
   if(h.source==='single'){
@@ -152,6 +148,6 @@ function hint(){
  }
  say(hintText);render();
 }
-$('easy').onclick=()=>reset('easy');$('medium').onclick=()=>reset('medium');$('hard').onclick=()=>reset('hard');$('logicMode').onclick=()=>{gameMode='logic';reset();};$('randomMode').onclick=()=>{gameMode='random';reset();};$('new').onclick=()=>reset();$('undo').onclick=undo;$('check').onclick=check;$('hint').onclick=hint;reset();
+$('easy').onclick=()=>reset('easy');$('medium').onclick=()=>reset('medium');$('hard').onclick=()=>reset('hard');$('new').onclick=()=>reset();$('undo').onclick=undo;$('check').onclick=check;$('hint').onclick=hint;reset();
 })();
 </script></body></html>
