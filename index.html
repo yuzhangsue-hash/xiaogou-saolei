@@ -22,7 +22,7 @@ h2{display:inline-block;margin:8px 0 6px;padding:13px 23px 13px 18px;border-radi
 .act:disabled{opacity:.55;cursor:not-allowed}
 .act.active{background:#f48fb1;color:#482c3b;border-color:#e67ca1;box-shadow:0 3px 0 #d87395}
 #new{background:#e1f6ec;border-color:#b6ddc9;box-shadow:0 3px 0 #b9dfca}
-#hint,#explain{background:#fff2cf;border-color:#e8d5a6;box-shadow:0 3px 0 #e7d5ad}
+#hint{background:#fff2cf;border-color:#e8d5a6;box-shadow:0 3px 0 #e7d5ad}
 .stats>strong{display:flex;align-items:center;gap:6px;padding:11px 16px;border:1px solid #e9d2dc;border-radius:16px;background:#fff;box-shadow:0 5px 16px #b9759120;font-size:14px}
 .stats>strong:nth-child(1):before{content:'💣';font-size:17px}
 .stats>strong:nth-child(2):before{content:'🌼';font-size:17px}
@@ -49,11 +49,12 @@ small{color:#806d77}
 </style></head><body>
 <h2>🐶 扫雷</h2>
 <div class="toolbar"><strong>难度</strong><button class="act" id="easy">初级</button><button class="act" id="medium">中级</button><button class="act" id="hard">高级</button><button class="act" id="new">重新开局</button></div>
+<div class="toolbar"><strong>棋盘模式</strong><button class="act" id="logicMode">纯逻辑</button><button class="act" id="randomMode">随机</button></div>
 <div class="stats"><strong>地雷 <span id="left">99</span></strong><strong>已翻开 <span id="opened">0</span>/<span id="safe">381</span></strong></div>
-<div class="toolbar"><button class="act" id="undo">撤销上一步</button><button class="act" id="check">检查旗子</button><button class="act" id="hint">下一步提示</button><button class="act" id="explain">解释推理</button></div>
+<div class="toolbar"><button class="act" id="undo">撤销上一步</button><button class="act" id="check">检查旗子</button><button class="act" id="hint">下一步提示</button></div>
 <div class="toolbar" id="touchControls" role="group" aria-label="触屏操作模式"><strong>触屏操作</strong><button class="act" id="touchReveal" type="button" aria-pressed="true">👆 翻开</button><button class="act" id="touchFlag" type="button" aria-pressed="false">🚩 插旗</button><small>选择操作后，轻触格子即可；再次轻触已插旗格子可取消旗子。</small></div>
-<div class="board-wrap"><div id="board"></div></div>
 <div id="status" aria-live="polite"></div>
+<div class="board-wrap"><div id="board"></div></div>
 <div id="report" hidden><strong>手动检查结果</strong> <small id="report-state">当前统计</small><div class="report-grid"><div>正确旗数<strong id="correct">0</strong></div><div>错误旗数<strong id="wrong">0</strong></div><div>未标记雷数<strong id="missing">99</strong></div></div><small>仅显示数量，不指出错误位置。检查不影响继续游戏。</small></div>
 <p><small class="desktop-help">左键翻开，右键插旗；Mac 触控板双指轻点可插旗。踩雷后可撤销。</small><small class="touch-help">手机上先选“翻开”或“插旗”，再轻触格子；踩雷后可撤销。</small></p>
 
@@ -63,6 +64,7 @@ small{color:#806d77}
 </style>
 <div id="victoryDogOverlay" role="dialog" aria-modal="true" aria-label="通关庆祝动画"><div id="victoryDogCard"><h3>通关成功！</h3><img id="victoryDogImage" alt="双狗通关庆祝动画"><div><button id="victoryDogAgain">再来一局</button></div></div></div>
 
+<script src="./solver.js"></script>
 <script>
 (function(){
 const $=id=>document.getElementById(id),board=$('board');
@@ -100,22 +102,56 @@ function showVictoryDog(){
 $('victoryDogAgain').onclick=()=>{closeVictoryDog();reset();};
 
 const levels={easy:[9,9,10],medium:[16,16,40],hard:[16,30,99]};
-let level='hard',R=16,C=30,M=99,N=480,SAFE=381;
-let cells=[],started=false,done=false,hit=-1,flags=0,opened=0,history=[],undos=0,hintAt=-1,hintText='',reportFresh=false;
+let level='hard',gameMode='logic',R=16,C=30,M=99,N=480,SAFE=381;
+let cells=[],started=false,done=false,generating=false,generatorWorker=null,hit=-1,flags=0,opened=0,history=[],undos=0,hintAt=-1,hintText='',reportFresh=false;
 const adj=i=>{const r=Math.floor(i/C),c=i%C,out=[];for(let dr=-1;dr<=1;dr++)for(let dc=-1;dc<=1;dc++){if(!dr&&!dc)continue;let rr=r+dr,cc=c+dc;if(rr>=0&&rr<R&&cc>=0&&cc<C)out.push(rr*C+cc)}return out};
 const pos=i=>'第'+(Math.floor(i/C)+1)+'行、第'+(i%C+1)+'列';
 const say=s=>$('status').textContent=s;
 function save(){history.push({cells:cells.map(x=>({...x})),started,done,hit,flags,opened});}
 function stale(){if(reportFresh){reportFresh=false;$('report-state').textContent='已过期，请重新检查';}}
-function reset(l=level){level=l;[R,C,M]=levels[level];N=R*C;SAFE=N-M;cells=Array.from({length:N},()=>({mine:false,n:0,open:false,flag:false}));started=false;done=false;hit=-1;flags=0;opened=0;history=[];undos=0;hintAt=-1;hintText='';reportFresh=false;$('report').hidden=true;for(const k of Object.keys(levels))$(k).classList.toggle('active',k===level);board.style.gridTemplateColumns='repeat('+C+',var(--tile-size,25px))';board.style.gridTemplateRows='repeat('+R+',var(--tile-size,25px))';$('safe').textContent=SAFE;say('');render();prepareVictoryDog();}
+function reset(l=level){if(generatorWorker){generatorWorker.terminate();generatorWorker=null;}generating=false;closeVictoryDog();level=l;[R,C,M]=levels[level];N=R*C;SAFE=N-M;cells=Array.from({length:N},()=>({mine:false,n:0,open:false,flag:false}));started=false;done=false;hit=-1;flags=0;opened=0;history=[];undos=0;hintAt=-1;hintText='';reportFresh=false;$('report').hidden=true;for(const k of Object.keys(levels))$(k).classList.toggle('active',k===level);$('logicMode').classList.toggle('active',gameMode==='logic');$('randomMode').classList.toggle('active',gameMode==='random');board.style.gridTemplateColumns='repeat('+C+',var(--tile-size,25px))';board.style.gridTemplateRows='repeat('+R+',var(--tile-size,25px))';$('safe').textContent=SAFE;say('');render();prepareVictoryDog();}
 function place(first){const banned=new Set([first,...adj(first)]),pool=[];for(let i=0;i<N;i++)if(!banned.has(i))pool.push(i);for(let k=0;k<M;k++){let j=k+Math.floor(Math.random()*(pool.length-k));[pool[k],pool[j]]=[pool[j],pool[k]];cells[pool[k]].mine=true;}for(let i=0;i<N;i++)cells[i].n=adj(i).filter(j=>cells[j].mine).length;started=true;}
-function reveal(i){if(done||cells[i].open||cells[i].flag)return;save();if(!started)place(i);stale();hintAt=-1;if(cells[i].mine){done=true;hit=i;say('踩雷：'+pos(i)+'。点击「撤销上一步」可恢复踩雷前状态，原雷区不变。');render();return;}const q=[i],seen=new Set();while(q.length){const j=q.pop();if(seen.has(j)||cells[j].open||cells[j].flag||cells[j].mine)continue;seen.add(j);cells[j].open=true;opened++;if(cells[j].n===0)for(const x of adj(j))if(!cells[x].open&&!cells[x].flag)q.push(x);}if(opened===SAFE){done=true;hit=-1;say('通关！全部安全格已翻开。');showVictoryDog();requestAnimationFrame(()=>requestAnimationFrame(render));return;}say('已翻开 '+opened+' 格。继续推理，或使用下一步提示。');render();}
-function flag(i){if(done||cells[i].open)return;save();cells[i].flag=!cells[i].flag;flags+=cells[i].flag?1:-1;hintAt=-1;stale();render();}
-function undo(){if(!history.length){say('没有可以撤销的操作。');return;}const s=history.pop();cells=s.cells;started=s.started;done=s.done;hit=s.hit;flags=s.flags;opened=s.opened;hintAt=-1;hintText='';undos++;stale();say('已撤销上一步。雷区布局保持不变（若撤销首次点击，则返回尚未布雷状态）。');render();}
+function generateLogic(first){
+ generating=true;say('正在生成并验证纯逻辑棋盘，请稍候…');
+ try{const worker=new Worker('./generator-worker.js');generatorWorker=worker;
+  worker.onmessage=e=>{if(generatorWorker!==worker)return;worker.terminate();generatorWorker=null;generating=false;
+   if(!e.data.ok){say('纯逻辑棋盘生成超时（已尝试 '+e.data.attempts+' 次）。本局未开始，请重新点击格子再试。');return;}
+   cells=e.data.board.map((c,i)=>({...c,flag:cells[i].flag}));started=true;reveal(first);
+  };
+  worker.onerror=()=>{if(generatorWorker!==worker)return;worker.terminate();generatorWorker=null;generating=false;say('纯逻辑棋盘生成失败，本局未开始。请重新点击格子再试。');};
+  worker.postMessage({rows:R,cols:C,mineCount:M,first});
+ }catch{generating=false;generatorWorker=null;say('此浏览器无法启动纯逻辑生成器，请换一个浏览器重试。');}
+}
+function reveal(i){if(generating||done||cells[i].open||cells[i].flag)return;if(!started){if(gameMode==='logic'){generateLogic(i);return;}place(i);}save();stale();hintAt=-1;if(cells[i].mine){done=true;hit=i;say('踩雷：'+pos(i)+'。点击「撤销上一步」可恢复踩雷前状态，原雷区不变。');render();return;}const q=[i],seen=new Set();while(q.length){const j=q.pop();if(seen.has(j)||cells[j].open||cells[j].flag||cells[j].mine)continue;seen.add(j);cells[j].open=true;opened++;if(cells[j].n===0)for(const x of adj(j))if(!cells[x].open&&!cells[x].flag)q.push(x);}if(opened===SAFE){done=true;hit=-1;say('通关！全部安全格已翻开。');showVictoryDog();requestAnimationFrame(()=>requestAnimationFrame(render));return;}say('已翻开 '+opened+' 格。继续推理，或使用下一步提示。');render();}
+function flag(i){if(generating||done||cells[i].open)return;save();cells[i].flag=!cells[i].flag;flags+=cells[i].flag?1:-1;hintAt=-1;stale();render();}
+function undo(){if(generating)return;if(!history.length){say('没有可以撤销的操作。');return;}const s=history.pop();cells=s.cells;started=s.started;done=s.done;hit=s.hit;flags=s.flags;opened=s.opened;hintAt=-1;hintText='';undos++;stale();say('已撤销上一步。原雷区布局保持不变。');render();}
 function render(){board.innerHTML='';for(let i=0;i<N;i++){const c=cells[i],el=document.createElement('button');el.type='button';el.className='tile '+(c.open?'open':'covered')+(c.flag?' flagged':'')+(hintAt===i?' hinted':'');el.setAttribute('aria-label',pos(i)+(c.open?' 已翻开':c.flag?' 已插旗':' 未知'));if(i===hit){el.textContent='✹';el.style.background='#fca5a5';}else if(c.open){if(c.mine){el.textContent='✹';el.style.background='#fca5a5';}else if(c.n){el.textContent=c.n;el.classList.add('n'+c.n);}}else if(c.flag){el.textContent='⚑';el.style.color='#dc2626';}el.addEventListener('click',()=>{if(matchMedia('(pointer:coarse)').matches&&touchMode==='flag')flag(i);else reveal(i)});el.addEventListener('contextmenu',e=>{e.preventDefault();flag(i)});board.appendChild(el);}$('left').textContent=M-flags;$('opened').textContent=opened;$('undo').disabled=!history.length;}
 function check(){if(!started){say('请先翻开一格，再检查旗子。');return;}let good=0,bad=0;for(const c of cells)if(c.flag){if(c.mine)good++;else bad++;}$('correct').textContent=good;$('wrong').textContent=bad;$('missing').textContent=M-good;$('report-state').textContent='当前统计';$('report').hidden=false;reportFresh=true;say('检查完成：正确 '+good+' 旗，错误 '+bad+' 旗，未标记雷数 '+(M-good)+'。不暴露错误位置。');}
-function constraints(){const out=[];for(let i=0;i<N;i++)if(cells[i].open&&!cells[i].mine&&cells[i].n){const near=adj(i),unknown=near.filter(j=>!cells[j].open&&!cells[j].flag),rem=cells[i].n-near.filter(j=>cells[j].flag).length;if(unknown.length)out.push({i,unknown,rem});}return out;}
-function hint(){if(!started){say('先翻开一个格子。');return;}if(done){say(hit>=0?'先撤销踩雷的那一步。':'本局已经通关。');return;}const cs=constraints(),candidates=[];for(const c of cs){if(c.rem===0)for(const j of c.unknown)candidates.push({j,type:'safe',why:pos(c.i)+' 的数字已由周围旗子满足，其他相邻未知格安全。'});if(c.rem===c.unknown.length)for(const j of c.unknown)candidates.push({j,type:'mine',why:pos(c.i)+' 还缺 '+c.rem+' 颗雷，恰好剩下 '+c.unknown.length+' 个未知格，所以全部是雷。'});}for(let a=0;a<cs.length;a++)for(let b=a+1;b<cs.length;b++)for(const [s,l] of [[cs[a],cs[b]],[cs[b],cs[a]]]){if(s.unknown.length>l.unknown.length||!s.unknown.every(j=>l.unknown.includes(j)))continue;const ss=new Set(s.unknown),diff=l.unknown.filter(j=>!ss.has(j)),rem=l.rem-s.rem;if(!diff.length)continue;if(rem===0||rem===diff.length)for(const j of diff)candidates.push({j,type:rem===0?'safe':'mine',why:pos(s.i)+' 与 '+pos(l.i)+' 的未知范围相减，多出的 '+diff.length+' 格需要 '+rem+' 颗雷。'});}const h=candidates.find(x=>x.type==='safe')||candidates.find(x=>x.type==='mine');if(!h){hintAt=-1;hintText='当前没有找到单数字或两区域相减可以直接证明的格子。可能需要多条件推理或概率判断。';say(hintText);render();return;}hintAt=h.j;hintText=(h.type==='safe'?'确定安全：':'确定有雷：')+pos(h.j)+'。'+h.why;say(hintText);render();}
-$('easy').onclick=()=>reset('easy');$('medium').onclick=()=>reset('medium');$('hard').onclick=()=>reset('hard');$('new').onclick=()=>reset();$('undo').onclick=undo;$('check').onclick=check;$('hint').onclick=hint;$('explain').onclick=()=>say(hintText||'先点击「下一步提示」，查看推理依据。');reset();
+function hint(){
+ if(generating){say('纯逻辑棋盘仍在生成，请稍候。');return;}
+ if(!started){say('先翻开一个格子。');return;}
+ if(done){say(hit>=0?'先撤销踩雷的那一步。':'本局已经通关。');return;}
+ const h=MinesweeperSolver.solveBoard({rows:R,cols:C,mineCount:M,cells});
+ if(h.kind==='inconsistent'){hintAt=-1;hintText='当前数字约束互相矛盾，请重新开局。';}
+ else if(h.kind==='none'){hintAt=-1;hintText='当前没有可提示的格子。';}
+ else if(h.kind==='guess'){
+  hintAt=h.index;const percent=(h.probability*100).toFixed(1);
+  hintText=gameMode==='logic'?'纯逻辑棋盘验证异常，请重新开局。':'没有逻辑确定解。'+pos(h.index)+' 的踩雷概率'+(h.source==='exact'?'为 ':'估计为 ')+percent+'%；这是概率选择，不是安全保证。';
+ }else{
+  hintAt=h.index;const clueIds=[...new Set(h.clues)],clues=clueIds.slice(0,6).map(i=>pos(i)+' 的数字 '+cells[i].n);
+  let reason;
+  if(h.source==='single'){
+   const c=clueIds[0],unknown=adj(c).filter(j=>!cells[j].open).length;
+   reason=cells[c].n===0?pos(c)+' 的数字是 0，周围未翻格都安全。':pos(c)+' 的数字是 '+cells[c].n+'，周围正好有 '+unknown+' 个未翻格，所以它们都是雷。';
+  }else if(h.source==='subset'){
+   const [a,b]=clueIds,small=adj(a).filter(j=>!cells[j].open),big=adj(b).filter(j=>!cells[j].open);
+   reason=pos(a)+' 的数字 '+cells[a].n+' 与 '+pos(b)+' 的数字 '+cells[b].n+' 相减，多出的 '+(big.length-small.length)+' 格需要 '+(cells[b].n-cells[a].n)+' 颗雷。';
+  }else if(h.source==='global')reason='全盘共有 '+M+' 颗雷，未翻格的雷数已全部确定。';
+  else reason='联立 '+clues.join('、')+(clueIds.length>6?'等数字':'')+(h.source==='global-csp'?'，再结合全盘 '+M+' 颗雷':'')+'；所有合法布雷组合都证明此格'+(h.kind==='safe'?'没有雷。':'有雷。');
+  hintText=(h.kind==='safe'?'确定安全：':'确定有雷：')+pos(h.index)+'。'+reason+(cells[h.index].flag&&h.kind==='safe'?' 这里插了旗，请先取消旗子。':'');
+ }
+ say(hintText);render();
+}
+$('easy').onclick=()=>reset('easy');$('medium').onclick=()=>reset('medium');$('hard').onclick=()=>reset('hard');$('logicMode').onclick=()=>{gameMode='logic';reset();};$('randomMode').onclick=()=>{gameMode='random';reset();};$('new').onclick=()=>reset();$('undo').onclick=undo;$('check').onclick=check;$('hint').onclick=hint;reset();
 })();
 </script></body></html>
