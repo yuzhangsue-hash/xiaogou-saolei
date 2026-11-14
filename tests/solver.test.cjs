@@ -2,6 +2,8 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const solver=require('../solver.js');
 const generator=require('../generator.js');
+const puzzles=require('../puzzle-library.js');
+const puzzleData=require('../puzzle-data.js');
 
 test('multi-number CSP proves a safe cell without a single or subset rule',()=>{
  const h=solver.solveModel({unknown:[0,1,2,3,4],mineCount:2,constraints:[
@@ -61,4 +63,37 @@ test('advanced empty board analysis stays fast',()=>{
  const cells=Array.from({length:480},()=>({open:false,n:0,flag:false,mine:false}));
  const start=Date.now();const h=solver.solveBoard({rows:16,cols:30,mineCount:99,cells});
  assert.equal(h.kind,'guess');assert.ok(Date.now()-start<1000);
+});
+test('every first click has an instant, safe, fully numbered puzzle',()=>{
+ for(const [rows,cols,mines] of [[9,9,10],[16,16,40],[16,30,99]]){
+  for(let first=0;first<rows*cols;first++){
+   const board=puzzles.getBoard(rows,cols,mines,first);
+   assert.ok(board,`missing ${rows}x${cols} first ${first}`);
+   assert.equal(board.filter(c=>c.mine).length,mines);
+   assert.equal(board[first].mine,false);
+   for(let i=0;i<board.length;i++){
+    const r=Math.floor(i/cols),c=i%cols;
+    const adjacent=board.filter((_,j)=>j!==i&&Math.max(Math.abs(r-Math.floor(j/cols)),Math.abs(c-j%cols))===1);
+    assert.equal(board[i].n,adjacent.filter(c=>c.mine).length);
+    if(Math.max(Math.abs(r-Math.floor(first/cols)),Math.abs(c-first%cols))<=1)assert.equal(board[i].mine,false);
+   }
+  }
+ }
+});
+test('preverified puzzle remains logic-solvable after symmetry mapping',()=>{
+ for(const [rows,cols,mines,first] of [[9,9,10,80],[16,16,40,255],[16,30,99,479]]){
+  const board=puzzles.getBoard(rows,cols,mines,first);
+  assert.equal(generator.verify(board,rows,cols,mines,first),true);
+ }
+});
+test('each opening position can rotate between two verified layouts',()=>{
+ for(const [rows,cols,mines] of [[9,9,10],[16,16,40],[16,30,99]]){
+  for(let first=0;first<rows*cols;first++){
+   const key=puzzles.canonical(rows,cols,first).key;
+   assert.equal(puzzleData[key].length,2);
+   const a=puzzles.getBoard(rows,cols,mines,first);
+   const b=puzzles.getBoard(rows,cols,mines,first);
+   assert.notDeepEqual(a.map(c=>c.mine),b.map(c=>c.mine));
+  }
+ }
 });
